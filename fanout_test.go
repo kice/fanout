@@ -31,7 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
-	"github.com/caddyserver/caddy"
+	"github.com/coredns/caddy"
 	"github.com/coredns/coredns/plugin/pkg/dnstest"
 	"github.com/stretchr/testify/suite"
 
@@ -146,11 +146,11 @@ func (t *fanoutTestSuite) TestConfigFromCorefile() {
 	c := caddy.NewTestController("dns", fmt.Sprintf(source, s.addr, t.network))
 	f, err := parseFanout(c)
 	t.Nil(err)
-	err = f.OnStartup()
-	t.Nil(err)
-	defer func() {
-		logErrIfNotNil(f.OnShutdown())
-	}()
+	// err = f.OnStartup()
+	// t.Nil(err)
+	// defer func() {
+	// 	logErrIfNotNil(f.OnShutdown())
+	// }()
 
 	m := new(dns.Msg)
 	m.SetQuestion("example.org.", dns.TypeA)

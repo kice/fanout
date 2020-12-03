@@ -24,6 +24,7 @@ import (
 
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/plugin/debug"
+	"github.com/coredns/coredns/plugin/dnstap"
 	clog "github.com/coredns/coredns/plugin/pkg/log"
 	"github.com/coredns/coredns/request"
 	"github.com/miekg/dns"
@@ -42,6 +43,7 @@ type Fanout struct {
 	from           string
 	attempts       int
 	workerCount    int
+	tapPlugin      *dnstap.Dnstap
 	Next           plugin.Handler
 }
 
@@ -98,7 +100,9 @@ func (f *Fanout) ServeDNS(ctx context.Context, w dns.ResponseWriter, m *dns.Msg)
 	if result.err != nil {
 		return dns.RcodeServerFailure, result.err
 	}
-	dnsTAP := toDnstap(ctx, result.client.Endpoint(), f.net, &req, result.response, result.start)
+	// dnsTAP := toDnstap(ctx, result.client.Endpoint(), f.net, &req, result.response, result.start)
+	dnsTAP := toDnstap2(ctx, f.tapPlugin, result.client.Endpoint(), f.net, w.RemoteAddr(), &req, result)
+
 	if !req.Match(result.response) {
 		debug.Hexdumpf(result.response, "Wrong reply for id: %d, %s %d", result.response.Id, req.QName(), req.QType())
 		formerr := new(dns.Msg)

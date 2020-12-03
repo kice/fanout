@@ -18,6 +18,9 @@ package fanout
 
 import (
 	"context"
+	"errors"
+	"net"
+	"strconv"
 	"time"
 
 	"github.com/coredns/coredns/plugin/dnstap"
@@ -25,7 +28,13 @@ import (
 	"github.com/coredns/coredns/request"
 
 	tap "github.com/dnstap/golang-dnstap"
-	"github.com/miekg/dns"
+)
+
+var (
+	protoUDP    = tap.SocketProtocol_UDP
+	protoTCP    = tap.SocketProtocol_TCP
+	familyINET  = tap.SocketFamily_INET
+	familyINET6 = tap.SocketFamily_INET6
 )
 
 func logErrIfNotNil(err error) {
@@ -35,40 +44,67 @@ func logErrIfNotNil(err error) {
 	log.Error(err)
 }
 
-func toDnstap(ctx context.Context, host, protocol string, state *request.Request, reply *dns.Msg, start time.Time) error {
-	tapper := dnstap.TapperFromContext(ctx)
-	if tapper == nil {
+func toDnstap2(ctx context.Context, tapPlugin *dnstap.Dnstap, host, protocol string, remote net.Addr, state *request.Request, resp *response) error {
+	if tapPlugin == nil {
 		return nil
 	}
-	// Query
-	b := msg.New().Time(start).HostPort(host)
 
-	if protocol == "tcp" {
-		b.SocketProto = tap.SocketProtocol_TCP
-	} else {
-		b.SocketProto = tap.SocketProtocol_UDP
-	}
-
-	if tapper.Pack() {
-		b.Msg(state.Req)
-	}
-	m, err := b.ToOutsideQuery(tap.Message_FORWARDER_QUERY)
+	q := new(tap.Message)
+	msg.SetQueryTime(q, resp.start)
+	err := setQueryHostPort(q, host, protocol)
 	if err != nil {
 		return err
 	}
-	tapper.TapMessage(m)
 
-	// Response
-	if reply != nil {
-		if tapper.Pack() {
-			b.Msg(reply)
-		}
-		m, err := b.Time(time.Now()).ToOutsideResponse(tap.Message_FORWARDER_RESPONSE)
+	if tapPlugin.IncludeRawMessage {
+		buf, _ := state.Req.Pack()
+		q.QueryMessage = buf
+	}
+	msg.SetType(q, tap.Message_FORWARDER_QUERY)
+	tapPlugin.TapMessage(q)
+
+	if resp.response != nil {
+		r := new(tap.Message)
+		msg.SetResponseTime(r, time.Now())
+		err = msg.SetResponseAddress(r, remote)
 		if err != nil {
 			return err
 		}
-		tapper.TapMessage(m)
+		msg.SetType(r, tap.Message_FORWARDER_RESPONSE)
+		tapPlugin.TapMessage(q)
 	}
 
 	return nil
+}
+
+func setQueryHostPort(t *tap.Message, addr string, protocol string) error {
+	ip, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
+	p, err := strconv.ParseUint(port, 10, 32)
+	if err != nil {
+		return err
+	}
+
+	v := uint32(p)
+	t.QueryPort = &v
+
+	if protocol == "tcp" {
+		t.SocketProtocol = &protoTCP
+	} else {
+		t.SocketProtocol = &protoUDP
+	}
+
+	if ip := net.ParseIP(ip); ip != nil {
+		t.QueryAddress = []byte(ip)
+		if ip := ip.To4(); ip != nil {
+			t.SocketFamily = &familyINET
+		} else {
+			t.SocketFamily = &familyINET6
+		}
+		return nil
+	}
+
+	return errors.New("not an ip address")
 }
